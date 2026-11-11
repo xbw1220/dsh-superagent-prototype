@@ -14,6 +14,9 @@ export function polled(ctx: SourceContext, thread: Thread, now = Date.now()): bo
 }
 /** Steps a poll start timestamp back by 5 seconds so late-arriving remote events are not missed; deterministic trigger IDs deduplicate overlaps. */
 export const cursorAt = (started: string): string => new Date(Date.parse(started) - 5000).toISOString()
+/** Wait before restarting an event consumer: 1s after a run that stayed up for a minute, otherwise exponential backoff up to 60s. */
+export const consumerRetry = (previous: number | undefined, ranMs: number): number =>
+  previous === undefined || ranMs >= 60_000 ? 1000 : Math.min(previous * 2, 60_000)
 /** Polls each subscribed Thread of `source` within the horizon independently; records failures on the Thread as `pollError` (unless `stopped()`) and clears `pollError` on success. */
 export async function pollThreads(ctx: SourceContext, source: string, stopped: () => boolean, poll: (thread: Thread) => Promise<void>,
   skip: (thread: Thread) => boolean = () => false): Promise<void> {

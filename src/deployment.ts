@@ -47,15 +47,24 @@ export const GithubAccountsSchema = z.object({
   cli: z.string().trim().default(''),
 })
 export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
+export const DingtalkBotSchema = z.object({
+  clientId: z.string().trim().default(''),
+  clientSecret: z.string().trim().default(''),
+  robotCode: z.string().trim().default(''),
+})
 /** Source configuration keys that affect deployment setup and trigger a restart when changed. */
-export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = { github: Object.keys(GithubAccountsSchema.shape), feishu: Object.keys(FeishuBotSchema.shape) }
+export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  github: Object.keys(GithubAccountsSchema.shape), feishu: Object.keys(FeishuBotSchema.shape), dingtalk: Object.keys(DingtalkBotSchema.shape),
+}
 
 export interface Deployment extends Machine {
   repository: string
   github: { cli: string; login: string; noreply: string }
   feishu?: FeishuBot
+  dingtalk?: DingtalkBot
 }
 export interface FeishuBot { cli: string; appId: string; brand: 'feishu' | 'lark'; botId: string; name: string }
+export interface DingtalkBot { clientId: string; clientSecret: string; robotCode: string }
 
 /** Resolve a command name or absolute path to an executable file, ignoring the worker shim directory. */
 export function executable(name: string, path: string, exclude?: string): string {
@@ -103,6 +112,41 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
   const repository = access.name
   if (access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
   return { ...machine, repository, github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
+}
+
+const DINGTALK_TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/accessToken'
+const dingtalkTokens = new Map<string, { value: string; expiresAt: number }>()
+/** Removes cached DingTalk access tokens; tests call it between cases. */
+export const clearDingtalkTokens = (): void => { dingtalkTokens.clear() }
+/**
+ * Fetches (and caches until a minute before it expires) the app access token the DingTalk OpenAPI requires.
+ * @throws Error when DingTalk refuses the credentials or the request fails.
+ */
+export async function dingtalkToken(bot: Pick<DingtalkBot, 'clientId' | 'clientSecret'>, fetcher: typeof fetch = fetch): Promise<string> {
+  const cached = dingtalkTokens.get(bot.clientId)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+  const response = await fetcher(DINGTALK_TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ appKey: bot.clientId, appSecret: bot.clientSecret }), signal: AbortSignal.timeout(30_000) })
+  const text = await response.text()
+  let data: { accessToken?: string; expireIn?: number; message?: string } = {}
+  try { data = JSON.parse(text) as typeof data } catch { /* Non-JSON diagnostics are kept below. */ }
+  if (!response.ok || !data.accessToken) throw new Error(data.message || `DingTalk refused the app credentials (HTTP ${response.status})`)
+  dingtalkTokens.set(bot.clientId, { value: data.accessToken, expiresAt: Date.now() + Math.max(0, (data.expireIn ?? 7200) - 60) * 1000 })
+  return data.accessToken
+}
+
+/**
+ * Verify that the configured DingTalk app credentials fetch an access token, and adopt the robot code the send APIs need.
+ * Workers never call a DingTalk CLI, so unlike Feishu there is no command to restrict.
+ */
+export async function resolveDingtalkBot(dingtalk: unknown, fetcher: typeof fetch = fetch): Promise<DingtalkBot | undefined> {
+  const { clientId, clientSecret, robotCode } = DingtalkBotSchema.parse(dingtalk ?? {})
+  if (!clientId && !clientSecret) return undefined
+  if (!clientId || !clientSecret) throw new SetupError('dingtalkCredentialsIncomplete')
+  await dingtalkToken({ clientId, clientSecret }, fetcher).catch((error: unknown) => {
+    throw error instanceof SetupError ? error : new SetupError('dingtalkCredentialsRefused', { output: reason(error) })
+  })
+  return { clientId, clientSecret, robotCode: robotCode || clientId }
 }
 
 const AuthStatus = z.object({ appId: z.string().regex(/^cli_[A-Za-z0-9]+$/), brand: z.enum(['feishu', 'lark']).default('feishu'), identities: z.object({ bot: z.object({ status: z.string() }) }) })
