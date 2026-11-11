@@ -36,7 +36,7 @@ export async function dingtalkApi<T>(bot: Pick<DingtalkBot, 'clientId' | 'client
   let data: Partial<DingtalkSendResult> = {}
   try { data = JSON.parse(text) as Partial<DingtalkSendResult> } catch { /* Non-JSON diagnostics are kept below. */ }
   if (!response.ok || data.errcode || (data.code !== undefined && data.code !== 'OK' && data.code !== 0)) {
-    const message = data.message ?? data.errmsg ?? text.slice(0, 500) ?? 'DingTalk request failed'
+    const message = data.message ?? data.errmsg ?? (text.slice(0, 500) || 'DingTalk request failed')
     const code = typeof data.errcode === 'number' ? data.errcode : typeof data.code === 'number' ? data.code : response.status
     throw new CliError(`${message}${data.code && typeof data.code === 'string' ? ` (${data.code})` : ''}`, code, response.status)
   }
