@@ -89,6 +89,3 @@ export function dingtalkTrigger(input: unknown): Trigger | undefined {
         text: textOf(parent).slice(0, 2000) } } : {}) } }
 }
 
-/** A message as the thread-context reader returns it. */
-export const dingtalkContextMessage = (message: { id: string; from: string; at: string; text: string; bot?: boolean }) =>
-  ({ id: message.id, from: message.from, at: message.at, text: message.text, ...message.bot ? { bot: true as const } : {} })

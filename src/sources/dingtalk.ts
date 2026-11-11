@@ -33,8 +33,8 @@ export const dingtalkThreadContext: ThreadContext<DingtalkConfig> = {
   read: async (_commands, trigger: Trigger, part) => {
     const own = { id: String(trigger.meta.messageId ?? ''), from: trigger.actor.id, at: trigger.at, text: trigger.text }
     const parent = trigger.meta.parent as { id?: string; from?: string; at?: string; text?: string } | undefined
-    const messages = part === 'parent'
-      ? [{ id: parent?.id ?? '', from: parent?.from ?? '', at: parent?.at ?? '', text: parent?.text ?? '' }]
+    const messages = part === 'parent' && parent?.id
+      ? [{ id: parent.id, from: parent.from ?? '', at: parent.at ?? '', text: parent.text ?? '' }]
       : [own]
     return { messages, body: { messages } }
   },
