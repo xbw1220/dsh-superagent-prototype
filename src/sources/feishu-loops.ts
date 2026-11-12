@@ -12,8 +12,10 @@ import { feishuRef, feishuTime, feishuTrigger, HistoricalMessageSchema, historyE
   from './feishu-trigger.ts'
 import { health, type SourceContext } from './host.ts'
 import { KV } from '../kv.ts'
-import { cursorAt, POLL_HORIZON_MS, polled, pollThreads as pollEach } from './poll.ts'
+import { consumerRetry, cursorAt, POLL_HORIZON_MS, polled, pollThreads as pollEach } from './poll.ts'
 import type { FeishuConfig } from './feishu.ts'
+
+export { consumerRetry }
 
 export const runFeishu = (ctx: SourceContext, signal: AbortSignal): Promise<unknown> =>
   Promise.allSettled([watch, backfillLoop, chatNamesLoop].map(loop => loop(ctx, signal)))
@@ -64,9 +66,6 @@ async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
     await delay(retry, undefined, { signal }).catch(() => {})
   }
 }
-/** Wait before restarting the event consumer: 1s after a run that stayed up for a minute, otherwise exponential backoff up to 60s. */
-export const consumerRetry = (previous: number | undefined, ranMs: number): number =>
-  previous === undefined || ranMs >= 60_000 ? 1000 : Math.min(previous * 2, 60_000)
 async function consume(ctx: SourceContext, signal: AbortSignal): Promise<void> {
   const child = spawn(bot(ctx).cli, ['event', 'consume', 'im.message.receive_v1', '--as', 'bot'],
     { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
